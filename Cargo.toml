@@ -1,6 +1,6 @@
 [package]
 name = "jsondepnet"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Sorah Fukumori <her@sorah.jp>"]
 description = "Cacheable forward and reverse dependency tree for Jsonnet/libsonnet files"
 keywords = ["jsonnet", "libsonnet", "dependencies", "cli"]
