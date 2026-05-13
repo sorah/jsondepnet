@@ -1,0 +1,7 @@
+[tools]
+actionlint = "latest"
+hk = "latest"
+pkl = "latest"
+
+[settings]
+install_before = "3d"

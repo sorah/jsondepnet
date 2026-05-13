@@ -1,0 +1,92 @@
+name: release
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.*'
+
+jobs:
+  test:
+    uses: ./.github/workflows/_test.yml
+
+  create-release:
+    needs: [test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: extract and validate version
+        run: |
+          VERSION_TAG="${{ github.ref_name }}"
+          VERSION="${VERSION_TAG#v}"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "Version: ${VERSION}"
+          if ! grep -q "^version = \"${VERSION}\"" Cargo.toml; then
+            echo "::error::Tag version ${VERSION} does not match Cargo.toml"
+            exit 1
+          fi
+      - name: create release
+        run: |
+          if gh release view "v${VERSION}" --json id >/dev/null 2>&1; then
+            echo "release already exists"
+          else
+            gh release create "v${VERSION}" --draft --verify-tag --title "${VERSION}"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-binaries:
+    needs: [create-release]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+          - target: aarch64-apple-darwin
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - if: runner.os == 'Linux'
+        run: sudo apt-get install -y musl-tools || (sudo apt-get update && sudo apt-get install -y musl-tools)
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - if: runner.os == 'Linux'
+        uses: taiki-e/setup-cross-toolchain-action@d62f33b587e73b0004731caebc7d2d46b18a7567 # v1.39.2
+        with:
+          target: ${{ matrix.target }}
+      - uses: taiki-e/upload-rust-binary-action@0e34102c043ded9f2ca39f7af5cd99a540c61aff # v1.29.1
+        with:
+          bin: jsondepnet
+          target: ${{ matrix.target }}
+          tar: unix
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: jsondepnet-${{ matrix.target }}.tar.gz
+
+  publish-crate:
+    needs: [build-binaries]
+    runs-on: ubuntu-latest
+    environment:
+      name: crates-io
+      url: https://crates.io/crates/jsondepnet
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: rust-lang/crates-io-auth-action@bbd81622f20ce9e2dd9622e3218b975523e45bbe # v1.0.4
+        id: auth
+      - run: cargo publish --no-verify
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
